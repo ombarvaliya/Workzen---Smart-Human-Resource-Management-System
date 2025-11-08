@@ -19,7 +19,7 @@ export default function Login() {
   const [password, setPassword] = useState("")
   const [selectedRole, setSelectedRole] = useState("Employee")
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault()
     if (email && password) {
       const userData = {
@@ -29,7 +29,11 @@ export default function Login() {
         avatar: email.charAt(0).toUpperCase(),
       }
       login(userData)
-      router.push("/dashboard")
+      try {
+        await router.push("/dashboard")
+      } catch (error) {
+        console.error("Navigation error:", error)
+      }
     }
   }
 

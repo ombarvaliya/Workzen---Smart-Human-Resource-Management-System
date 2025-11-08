@@ -19,11 +19,15 @@ export function AuthProvider({ children }) {
   const login = (userData) => {
     setUser(userData)
     localStorage?.setItem("workzen_user", JSON.stringify(userData))
+    // Set cookie for server-side auth
+    document.cookie = `user=${JSON.stringify(userData)}; path=/`
   }
 
   const logout = () => {
     setUser(null)
     localStorage?.removeItem("workzen_user")
+    // Clear the auth cookie
+    document.cookie = "user=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT"
   }
 
   return <AuthContext.Provider value={{ user, isLoading, login, logout }}>{children}</AuthContext.Provider>

@@ -1,5 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import { AuthProvider } from "./context/auth-context"
+import { SidebarProvider } from "./context/sidebar-context"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
@@ -32,8 +34,12 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
-        {children}
-        <Analytics />
+        <AuthProvider>
+          <SidebarProvider>
+            {children}
+            <Analytics />
+          </SidebarProvider>
+        </AuthProvider>
       </body>
     </html>
   )

@@ -54,32 +54,45 @@ export default function Profile() {
     try {
       if (!user) return
 
-      if (user?.role === "Admin") {
-        setEmployeeData({
-          id: user.loginId,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          companyName: user.companyName,
-          role: user.role,
-          avatar: user.avatar,
-          createdAt: user.createdAt,
-          skills: [],
-          certifications: [],
-          about: "",
-        })
-      } else {
-        const response = await fetch(`/api/employees?companyId=${user?.loginId || ""}`)
-        const data = await response.json()
-        if (data.success) {
-          const employee = data.employees.find(emp => emp.email === user?.email)
-          if (employee) {
-            setEmployeeData(employee)
-          }
+      const authToken = localStorage.getItem('authToken')
+      
+      // Fetch user data from /api/users
+      const response = await fetch(`/api/users`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch profile')
+      }
+
+      const data = await response.json()
+      
+      if (data.success && data.data) {
+        // Find the current user's data
+        const currentUser = data.data.find(u => u.id === user.id || u.email === user.email)
+        
+        if (currentUser) {
+          setEmployeeData({
+            id: currentUser.id,
+            name: currentUser.name,
+            email: currentUser.email,
+            phone: currentUser.phone || '',
+            department: currentUser.department,
+            role: currentUser.role,
+            salary: currentUser.salary,
+            createdAt: currentUser.createdAt,
+            skills: [],
+            certifications: [],
+            about: "",
+          })
         }
       }
     } catch (error) {
       console.error("Error fetching profile:", error)
+      toast.error("Failed to load profile data")
     } finally {
       setLoading(false)
     }
@@ -203,10 +216,6 @@ export default function Profile() {
 
   const tabs = [
     { id: "profile", label: "My Profile", icon: User },
-    { id: "private", label: "Private Info", icon: IdCard },
-    ...(user?.role === "Admin" || user?.role === "Payroll Officer"
-      ? [{ id: "salary", label: "Salary Info", icon: DollarSign }]
-      : []),
     { id: "security", label: "Security", icon: Shield },
   ]
 

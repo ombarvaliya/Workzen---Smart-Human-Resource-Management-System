@@ -19,74 +19,87 @@ export function AuthProvider({ children }) {
 
   /**
    * useEffect Hook - Runs once when component mounts
-   * Checks if user was previously logged in by reading from cookie
+   * Checks if user was previously logged in by verifying JWT token
    * This restores the user session on page refresh
    */
   useEffect(() => {
-    // Check cookie for existing session (set during login)
-    const cookieUser = document.cookie
-      .split('; ')
-      .find(row => row.startsWith('user='))
-      ?.split('=')[1]
-    
-    if (cookieUser) {
-      try {
-        setUser(JSON.parse(decodeURIComponent(cookieUser)))
-      } catch (error) {
-        console.error("Error parsing user cookie:", error)
+    const verifyToken = async () => {
+      // Check localStorage for existing token
+      const token = localStorage.getItem('authToken')
+      const storedUser = localStorage.getItem('user')
+      
+      if (token) {
+        try {
+          const response = await fetch('/api/auth/verify', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            if (data.success) {
+              setUser(data.user)
+              // Update stored user data
+              localStorage.setItem('user', JSON.stringify(data.user))
+            } else {
+              // Invalid token, clear it
+              localStorage.removeItem('authToken')
+              localStorage.removeItem('user')
+            }
+          } else {
+            // Token expired or invalid
+            localStorage.removeItem('authToken')
+            localStorage.removeItem('user')
+          }
+        } catch (error) {
+          console.error("Error verifying token:", error)
+          localStorage.removeItem('authToken')
+          localStorage.removeItem('user')
+        }
+      } else if (storedUser) {
+        // If no token but user data exists, try to use it (fallback)
+        try {
+          setUser(JSON.parse(storedUser))
+        } catch (error) {
+          console.error("Error parsing stored user:", error)
+          localStorage.removeItem('user')
+        }
       }
+      setIsLoading(false)
     }
-    setIsLoading(false) // Done checking, stop loading
+
+    verifyToken()
   }, [])
 
   /**
    * Login Function
-   * Authenticates user by checking credentials from JSON file via API
-   * @param {Object} credentials - Login credentials (email/loginId and password)
+   * Authenticates user with email and password, returns JWT token
+   * @param {Object} credentials - Login credentials (email and password)
    * @returns {Promise} Resolves if login successful, rejects with error message
    */
   const login = async (credentials) => {
     try {
-      const url = `${window.location.origin}/api/auth`
-      console.log("Calling auth API at:", url)
-      
-      const response = await fetch(url, {
+      const response = await fetch('/api/auth/login', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "login",
-          email: credentials.email,
-          loginId: credentials.loginId,
+          email: credentials.email || credentials.loginId, // Support both email and loginId
           password: credentials.password,
         }),
       })
-      
-      console.log("Auth API response status:", response.status)
-      console.log("Auth API response URL:", response.url)
-
-      // Check if response is OK
-      if (!response.ok) {
-        console.error("Auth API response not OK:", response.status, response.statusText)
-        throw new Error(`Server error: ${response.status}`)
-      }
-
-      // Check content type
-      const contentType = response.headers.get("content-type")
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text()
-        console.error("Response is not JSON:", contentType, text.substring(0, 200))
-        throw new Error("Invalid response from server")
-      }
 
       const data = await response.json()
 
       if (data.success) {
         setUser(data.user) // Update React state
-        // Set cookie for server-side authentication (used by middleware)
-        document.cookie = `user=${encodeURIComponent(JSON.stringify(data.user))}; path=/; max-age=86400` // 24 hours
+        // Store JWT token in localStorage
+        localStorage.setItem('authToken', data.token)
+        // Store user data in localStorage for easy access
+        localStorage.setItem('user', JSON.stringify(data.user))
         return data.user
       } else {
-        throw new Error(data.message || "Login failed")
+        throw new Error(data.error || data.message || "Login failed")
       }
     } catch (error) {
       console.error("Login error:", error)
@@ -95,29 +108,34 @@ export function AuthProvider({ children }) {
   }
 
   /**
-   * SignUp Function
-   * Registers a new user/company and saves data to JSON file via API
-   * @param {Object} userData - User registration data (loginId, name, email, etc.)
+   * SignUp Function (Public)
+   * Registers a new user via the public signup API
+   * @param {Object} userData - User registration data (name, email, password, companyName, phone)
    * @returns {Promise} Resolves if signup successful, rejects with error message
    */
   const signup = async (userData) => {
     try {
-      const response = await fetch("/api/auth", {
+      const response = await fetch("/api/signup", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({
-          action: "signup",
-          ...userData,
+          name: userData.name,
+          email: userData.email,
+          password: userData.password,
+          companyName: userData.companyName,
+          phone: userData.phone,
         }),
       })
 
       const data = await response.json()
 
       if (data.success) {
-        console.log("User registered successfully:", userData.loginId)
+
         return data.user
       } else {
-        throw new Error(data.message || "Signup failed")
+        throw new Error(data.error || data.message || "Signup failed")
       }
     } catch (error) {
       console.error("Signup error:", error)
@@ -126,17 +144,55 @@ export function AuthProvider({ children }) {
   }
 
   /**
+   * Create User Function (Admin/Manager only)
+   * Creates a new user with specific role - requires authentication
+   * @param {Object} userData - User data (name, email, password, role, department)
+   * @returns {Promise} Resolves if user created successfully
+   */
+  const createUser = async (userData) => {
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          name: userData.name,
+          email: userData.email,
+          password: userData.password,
+          role: userData.role || 'Employee',
+          department: userData.department,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+
+        return data.data
+      } else {
+        throw new Error(data.error || data.message || "User creation failed")
+      }
+    } catch (error) {
+      console.error("Create user error:", error)
+      throw error
+    }
+  }
+
+  /**
    * Logout Function
-   * Clears user data from state and cookies
+   * Clears user data from state and localStorage
    */
   const logout = () => {
     setUser(null) // Clear React state
-    // Clear the auth cookie by setting expiration date in the past
-    document.cookie = "user=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT"
+    // Clear the auth token and user data from localStorage
+    localStorage.removeItem('authToken')
+    localStorage.removeItem('user')
   }
 
   // Provide auth state and functions to all child components
-  return <AuthContext.Provider value={{ user, isLoading, login, logout, signup }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, isLoading, login, logout, signup, createUser }}>{children}</AuthContext.Provider>
 }
 
 /**

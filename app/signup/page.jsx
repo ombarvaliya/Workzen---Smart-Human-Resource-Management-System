@@ -181,33 +181,28 @@ export default function SignUp() {
     
     setIsSubmitting(true)
     
-    // Generate Login ID
-    const loginId = generateLoginId()
-    
-    // Create user data object
+    // Create user data object matching backend API expectations
     const userData = {
-      loginId,
-      companyName,
       name,
       email,
+      password,
+      companyName, // Backend uses this as department
       phone,
-      password, // In production, this would be hashed
-      logo: logoPreview,
-      role: "Admin", // First user from company is Admin
-      avatar: name.charAt(0).toUpperCase(),
-      createdAt: new Date().toISOString(),
     }
     
     try {
-      // Call signup function which will save user to JSON file
-      await signup(userData)
+      // Call signup function which will create user in database
+      const result = await signup(userData)
       
-      // Show success message with Login ID
-      alert(`Account created successfully!\n\nYour Login ID is: ${loginId}\n\nPlease save this for future logins.`)
+      // Show success message
+      alert(`Account successfully ban gaya!\n\nEmail: ${email}\n\nAb aap login kar sakte hain.`)
       await router.push("/")
     } catch (error) {
       console.error("Signup error:", error)
-      setErrors({ general: error.message || "Failed to create account. Please try again." })
+      // Display error message to user
+      setErrors({ 
+        general: error.message || "Account banane mein problem aa gayi. Kripya phir se try karein." 
+      })
     } finally {
       setIsSubmitting(false)
     }

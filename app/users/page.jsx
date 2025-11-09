@@ -5,7 +5,7 @@ import { useAuth } from "@/app/context/auth-context"
 import { LayoutWrapper } from "@/components/layout-wrapper"
 import { DataTable } from "@/components/data-table"
 import { motion } from "framer-motion"
-import { Trash2, Edit2, UserPlus, X, Save, Mail, Phone, User, Briefcase, Building2, Shield, DollarSign, Eye, EyeOff, Search } from "lucide-react"
+import { Trash2, Edit2, UserPlus, X, Save, Mail, Phone, User, Briefcase, Building2, Shield, IndianRupee, Eye, EyeOff, Search } from "lucide-react"
 import toast, { Toaster } from "react-hot-toast"
 import { useRouter } from "next/navigation"
 
@@ -36,11 +36,24 @@ export default function Users() {
   const [showPassword, setShowPassword] = useState(false)
   const [showCustomRole, setShowCustomRole] = useState(false)
   const [customRole, setCustomRole] = useState("")
+  
+  // Department management
+  const [departments, setDepartments] = useState([
+    "Engineering",
+    "Marketing",
+    "Sales",
+    "HR",
+    "Finance",
+    "Operations",
+    "Customer Support"
+  ])
+  const [showCustomDepartment, setShowCustomDepartment] = useState(false)
+  const [newDepartment, setNewDepartment] = useState("")
 
   useEffect(() => {
-    // Only admins can access this page
-    if (user && user.role !== "Admin") {
-      toast.error("Access denied. Only admins can manage employees.")
+    // Only admins, managers and HR officers can access this page
+    if (user && user.role !== "Admin" && user.role !== "Manager" && user.role !== "HR Officer") {
+      toast.error("Access denied. Only admins, managers and HR officers can manage users.")
       router.push("/dashboard")
       return
     }
@@ -52,11 +65,19 @@ export default function Users() {
 
   const fetchEmployees = async () => {
     try {
-      const response = await fetch(`/api/employees?companyId=${user?.loginId || ""}`)
+      const authToken = localStorage.getItem('authToken')
+      const response = await fetch(`/api/users`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      })
       const data = await response.json()
       if (data.success) {
-        setEmployees(data.employees)
-        setFilteredEmployees(data.employees)
+        setEmployees(data.data)
+        setFilteredEmployees(data.data)
+      } else {
+        toast.error(data.error || "Failed to load employees")
       }
     } catch (error) {
       console.error("Error fetching employees:", error)
@@ -100,11 +121,11 @@ export default function Users() {
     if (!formData.email.trim()) errors.email = "Email is required"
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = "Invalid email format"
     
-    if (!formData.phone.trim()) errors.phone = "Phone is required"
-    else if (!/^\+?[\d\s-]{10,}$/.test(formData.phone)) errors.phone = "Invalid phone number"
+    // Phone is optional
+    if (formData.phone && !/^\+?[\d\s-]{10,}$/.test(formData.phone)) errors.phone = "Invalid phone number"
     
     if (!formData.department.trim()) errors.department = "Department is required"
-    if (!formData.position.trim()) errors.position = "Position is required"
+    // Position is optional
     
     // Validate custom role if selected
     if (showCustomRole && !customRole.trim()) {
@@ -114,10 +135,7 @@ export default function Users() {
     // Password is only required when creating a new employee
     if (!editingEmployee) {
       if (!formData.password) errors.password = "Password is required"
-      else if (formData.password.length < 8) errors.password = "Password must be at least 8 characters"
-      else if (!/(?=.*[a-z])/.test(formData.password)) errors.password = "Must contain lowercase letter"
-      else if (!/(?=.*[A-Z])/.test(formData.password)) errors.password = "Must contain uppercase letter"
-      else if (!/(?=.*\d)/.test(formData.password)) errors.password = "Must contain a number"
+      else if (formData.password.length < 6) errors.password = "Password must be at least 6 characters"
     }
     
     if (formData.salary && isNaN(formData.salary)) errors.salary = "Salary must be a number"
@@ -140,22 +158,21 @@ export default function Users() {
     try {
       if (editingEmployee) {
         // Update existing employee
+        const authToken = localStorage.getItem('authToken')
         const finalRole = showCustomRole && customRole.trim() ? customRole.trim() : formData.role
         const updateData = {
-          id: editingEmployee.id,
           name: formData.name.trim(),
           email: formData.email.trim().toLowerCase(),
-          phone: formData.phone.trim(),
-          department: formData.department.trim(),
-          position: formData.position.trim(),
           role: finalRole,
-          salary: formData.salary ? parseFloat(formData.salary) : null,
-          avatar: formData.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2),
+          department: formData.department.trim(),
         }
         
-        const response = await fetch("/api/employees", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
+        const response = await fetch(`/api/users?id=${editingEmployee.id}`, {
+          method: "PATCH",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${authToken}`
+          },
           body: JSON.stringify(updateData),
         })
         
@@ -184,29 +201,22 @@ export default function Users() {
         }
       } else {
         // Create new employee
+        const authToken = localStorage.getItem('authToken')
         const finalRole = showCustomRole && customRole.trim() ? customRole.trim() : formData.role
         const employeeData = {
-          id: generateEmployeeId(),
           name: formData.name.trim(),
           email: formData.email.trim().toLowerCase(),
-          phone: formData.phone.trim(),
-          department: formData.department.trim(),
-          position: formData.position.trim(),
-          role: finalRole,
-          salary: formData.salary ? parseFloat(formData.salary) : null,
           password: formData.password,
-          status: "absent",
-          avatar: formData.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2),
-          avatarColor: `#${Math.floor(Math.random()*16777215).toString(16)}`,
-          checkInTime: null,
-          checkOutTime: null,
-          companyId: user.loginId,
-          createdAt: new Date().toISOString(),
+          role: finalRole,
+          department: formData.department.trim(),
         }
         
-        const response = await fetch("/api/employees", {
+        const response = await fetch("/api/users", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${authToken}`
+          },
           body: JSON.stringify(employeeData),
         })
         
@@ -230,12 +240,12 @@ export default function Users() {
           })
           fetchEmployees()
         } else {
-          toast.error(data.message || "Failed to create employee")
+          toast.error(data.error || data.message || "Failed to create employee")
         }
       }
     } catch (error) {
       console.error("Error saving employee:", error)
-      toast.error("Error saving employee")
+      toast.error(error.message || "Error saving employee")
     } finally {
       setIsSubmitting(false)
     }
@@ -252,7 +262,7 @@ export default function Users() {
     setEditingEmployee(employee)
     
     // Check if the role is a custom role (not in predefined list)
-    const predefinedRoles = ["Employee", "Manager", "HR Officer", "Payroll Officer"]
+    const predefinedRoles = ["Employee", "Manager", "Admin", "HR Officer", "Payroll Officer"]
     const isCustomRole = !predefinedRoles.includes(employee.role)
     
     setFormData({
@@ -283,8 +293,12 @@ export default function Users() {
     }
     
     try {
-      const response = await fetch(`/api/employees?id=${employee.id}`, {
+      const authToken = localStorage.getItem('authToken')
+      const response = await fetch(`/api/users?id=${employee.id}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${authToken}`
+        }
       })
       
       const data = await response.json()
@@ -296,7 +310,7 @@ export default function Users() {
         })
         fetchEmployees()
       } else {
-        toast.error(data.message || "Failed to delete employee")
+        toast.error(data.error || "Failed to delete employee")
       }
     } catch (error) {
       console.error("Error deleting employee:", error)
@@ -320,10 +334,43 @@ export default function Users() {
     setFormErrors({})
     setShowCustomRole(false)
     setCustomRole("")
+    setShowCustomDepartment(false)
+    setNewDepartment("")
+  }
+
+  // Add new department
+  const handleAddDepartment = () => {
+    if (newDepartment.trim()) {
+      if (departments.includes(newDepartment.trim())) {
+        toast.error("Department already exists")
+        return
+      }
+      setDepartments([...departments, newDepartment.trim()])
+      setFormData({ ...formData, department: newDepartment.trim() })
+      setNewDepartment("")
+      setShowCustomDepartment(false)
+      toast.success("Department added successfully!")
+    }
+  }
+
+  // Remove department
+  const handleRemoveDepartment = (deptToRemove) => {
+    if (!confirm(`Are you sure you want to remove "${deptToRemove}" department?`)) {
+      return
+    }
+    
+    // Check if any employee is using this department
+    const isUsed = employees.some(emp => emp.department === deptToRemove)
+    if (isUsed) {
+      toast.error("Cannot remove department. It is assigned to one or more employees.")
+      return
+    }
+    
+    setDepartments(departments.filter(dept => dept !== deptToRemove))
+    toast.success("Department removed successfully!")
   }
 
   // Debug logging
-  console.log("Users Page - Auth State:", { user, authLoading, loading, role: user?.role })
 
   // Show loading spinner while checking auth or loading employees
   if (authLoading || loading) {
@@ -336,13 +383,11 @@ export default function Users() {
     )
   }
 
-  // If user is not logged in or not admin, don't render (useEffect will redirect)
-  if (!user || user.role !== "Admin") {
-    console.log("Users Page - Access Denied:", { user: user?.name, role: user?.role })
+  // If user is not logged in or not authorized, don't render (useEffect will redirect)
+  if (!user || (user.role !== "Admin" && user.role !== "Manager" && user.role !== "HR Officer")) {
+
     return null
   }
-  
-  console.log("Users Page - Rendering with user:", user.name, "Role:", user.role)
 
   const headers = ["ID", "Name", "Email", "Department", "Position", "Status", "Actions"]
   const rows = filteredEmployees.map((emp) => [
@@ -499,22 +544,78 @@ export default function Users() {
                     <Building2 size={16} />
                     Department *
                   </label>
-                  <select
-                    value={formData.department}
-                    onChange={(e) => handleInputChange("department", e.target.value)}
-                    className={`w-full px-4 py-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${
-                      formErrors.department ? "border-red-500" : "border-border"
-                    }`}
-                  >
-                    <option value="">Select Department</option>
-                    <option value="Engineering">Engineering</option>
-                    <option value="Marketing">Marketing</option>
-                    <option value="Sales">Sales</option>
-                    <option value="HR">HR</option>
-                    <option value="Finance">Finance</option>
-                    <option value="Operations">Operations</option>
-                    <option value="Customer Support">Customer Support</option>
-                  </select>
+                  
+                  {!showCustomDepartment ? (
+                    <div className="space-y-2">
+                      <select
+                        value={formData.department}
+                        onChange={(e) => {
+                          if (e.target.value === "__add_new__") {
+                            setShowCustomDepartment(true)
+                          } else {
+                            handleInputChange("department", e.target.value)
+                          }
+                        }}
+                        className={`w-full px-4 py-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${
+                          formErrors.department ? "border-red-500" : "border-border"
+                        }`}
+                      >
+                        <option value="">Select Department</option>
+                        {departments.map((dept) => (
+                          <option key={dept} value={dept}>{dept}</option>
+                        ))}
+                        <option value="__add_new__">+ Add New Department</option>
+                      </select>
+                      
+                      {/* Show remove button for selected department if admin */}
+                      {formData.department && user?.role === "Admin" && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDepartment(formData.department)}
+                          className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
+                        >
+                          <X size={12} />
+                          Remove "{formData.department}" from list
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newDepartment}
+                          onChange={(e) => setNewDepartment(e.target.value)}
+                          className="flex-1 px-4 py-3 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          placeholder="Enter new department name"
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handleAddDepartment()
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddDepartment}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                        >
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCustomDepartment(false)
+                            setNewDepartment("")
+                          }}
+                          className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   {formErrors.department && <p className="text-red-500 text-xs mt-1">{formErrors.department}</p>}
                 </div>
 
@@ -598,7 +699,7 @@ export default function Users() {
                 {/* Salary */}
                 <div>
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-2">
-                    <DollarSign size={16} />
+                    <IndianRupee size={16} />
                     Salary (Optional)
                   </label>
                   <input

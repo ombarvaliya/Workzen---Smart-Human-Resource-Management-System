@@ -9,17 +9,17 @@ import { Building2, Users, Clock, Calendar, Banknote, BarChart3, Settings, UserC
 
 // Main navigation menu items visible to all users
 const menuItems = [
-  { icon: Users, label: "Employees", href: "/dashboard" },
-  { icon: Clock, label: "Attendance", href: "/attendance" },
-  { icon: Calendar, label: "Time Off", href: "/leave" },
-  { icon: Banknote, label: "Payroll", href: "/payroll" },
-  { icon: BarChart3, label: "Reports", href: "/reports" },
-  { icon: Settings, label: "Settings", href: "/settings" },
+  { icon: Users, label: "Dashboard", href: "/dashboard", roles: ['Admin', 'Manager', 'Employee', 'HR Officer', 'Payroll Officer'] },
+  { icon: Clock, label: "Attendance", href: "/attendance", roles: ['Admin', 'Manager', 'Employee', 'HR Officer', 'Payroll Officer'] },
+  { icon: Calendar, label: "Time Off", href: "/leave", roles: ['Admin', 'Manager', 'Employee', 'HR Officer', 'Payroll Officer'] },
+  { icon: Banknote, label: "Payroll", href: "/payroll", roles: ['Admin', 'Manager', 'Payroll Officer'] },
+  { icon: BarChart3, label: "Reports", href: "/reports", roles: ['Admin', 'Manager', 'HR Officer'] },
 ]
 
-// Admin-only menu items
+// Admin/Manager/HR Officer menu items
 const adminMenuItems = [
-  { icon: UserCog, label: "Manage Employees", href: "/users" },
+  { icon: UserCog, label: "Manage Users", href: "/users", roles: ['Admin', 'Manager', 'HR Officer'] },
+  { icon: Settings, label: "Settings", href: "/settings", roles: ['Admin', 'Manager'] },
 ]
 
 /**
@@ -58,49 +58,53 @@ export function Sidebar() {
 
       {/* Navigation Menu */}
       <nav className="p-4 space-y-2">
-        {menuItems.map((item) => {
-          const Icon = item.icon
-          const isActive = pathname === item.href
+        {menuItems
+          .filter(item => !item.roles || item.roles.includes(user?.role))
+          .map((item) => {
+            const Icon = item.icon
+            const isActive = pathname === item.href
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
-              }`}
-            >
-              <Icon size={20} />
-              <span className="font-medium">{item.label}</span>
-            </Link>
-          )
-        })}
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                  isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
+                }`}
+              >
+                <Icon size={20} />
+                <span className="font-medium">{item.label}</span>
+              </Link>
+            )
+          })}
 
         {/* Admin-only section */}
-        {user?.role === "Admin" && (
+        {(user?.role === "Admin" || user?.role === "Manager" || user?.role === "HR Officer") && (
           <>
             <div className="pt-4 pb-2">
               <p className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Admin Tools
+                {user?.role === "HR Officer" ? "HR Tools" : "Admin Tools"}
               </p>
             </div>
-            {adminMenuItems.map((item) => {
-              const Icon = item.icon
-              const isActive = pathname === item.href
+            {adminMenuItems
+              .filter(item => !item.roles || item.roles.includes(user?.role))
+              .map((item) => {
+                const Icon = item.icon
+                const isActive = pathname === item.href
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                    isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
-                  }`}
-                >
-                  <Icon size={20} />
-                  <span className="font-medium">{item.label}</span>
-                </Link>
-              )
-            })}
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                      isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <Icon size={20} />
+                    <span className="font-medium">{item.label}</span>
+                  </Link>
+                )
+              })}
           </>
         )}
       </nav>

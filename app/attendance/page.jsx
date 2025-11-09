@@ -7,6 +7,15 @@ import { useState, useEffect } from "react"
 import { useAuth } from "@/app/context/auth-context"
 import toast from "react-hot-toast"
 
+// Helper function to get today's date in YYYY-MM-DD format (local timezone)
+const getTodayDate = () => {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 /**
  * Attendance Page Component
  * Displays employee attendance records in a table format
@@ -16,25 +25,89 @@ export default function Attendance() {
   const { user } = useAuth()
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(getTodayDate())
 
   useEffect(() => {
     if (user) {
       fetchEmployees()
     }
-  }, [user])
+  }, [user, selectedDate]) // Add selectedDate to dependencies
 
   const fetchEmployees = async () => {
     try {
-      const companyId = user?.role === "Admin" ? user.loginId : user?.companyId || ""
-      const response = await fetch(`/api/employees?companyId=${companyId}`)
-      const data = await response.json()
+      setLoading(true) // Show loading when refetching
+      const authToken = localStorage.getItem('authToken')
       
-      if (data.success) {
-        setEmployees(data.employees)
-      } else {
+      // Fetch users
+      const usersResponse = await fetch(`/api/users`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      const usersData = await usersResponse.json()
+      
+      if (!usersData.success || !usersData.data || !Array.isArray(usersData.data)) {
         toast.error("Failed to load employees")
+        setEmployees([])
+        setLoading(false)
+        return
       }
+
+      // Fetch attendance records for selected date
+
+      const attendanceResponse = await fetch(`/api/attendance`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      const attendanceData = await attendanceResponse.json()
+
+      // Merge user and attendance data
+      const employeesWithAttendance = usersData.data.map(user => {
+        const dateAttendance = attendanceData.data?.find(record => {
+          const match = record.userId === user.id && record.date === selectedDate
+
+          return match
+        })
+
+        // Calculate actual status based on worked hours
+        let calculatedStatus = 'absent'
+        if (dateAttendance?.checkIn && dateAttendance?.checkOut) {
+          const checkInDate = new Date(dateAttendance.checkIn)
+          const checkOutDate = new Date(dateAttendance.checkOut)
+          const workedHours = (checkOutDate - checkInDate) / (1000 * 60 * 60)
+          
+          if (workedHours >= 8) {
+            calculatedStatus = 'present'
+          } else if (workedHours >= 4) {
+            calculatedStatus = 'half day'
+          } else {
+            calculatedStatus = 'absent'
+          }
+        } else if (dateAttendance?.checkIn && !dateAttendance?.checkOut) {
+          // Only checked in, not yet checked out - consider present for now
+          calculatedStatus = 'present'
+        } else {
+          calculatedStatus = 'absent'
+        }
+        
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          department: user.department,
+          position: user.role, // Use role as position
+          status: calculatedStatus,
+          checkInTime: dateAttendance?.checkIn ? new Date(dateAttendance.checkIn).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '-',
+          checkOutTime: dateAttendance?.checkOut ? new Date(dateAttendance.checkOut).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '-',
+          avatar: user.name.charAt(0).toUpperCase(),
+          avatarColor: '#8B5CF6'
+        }
+      })
+
+      setEmployees(employeesWithAttendance)
     } catch (error) {
       console.error("Error fetching employees:", error)
       toast.error("Error loading attendance data")
@@ -78,10 +151,14 @@ export default function Attendance() {
       className={`px-3 py-1 rounded-full text-xs font-medium ${
         emp.status === "present" 
           ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
+          : emp.status === "half day"
+          ? "bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+          : emp.status === "leave"
+          ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
           : "bg-gray-50 text-gray-700 dark:bg-gray-800 dark:text-gray-400"
       }`}
     >
-      {emp.status === "present" ? "Present" : "Absent"}
+      {emp.status === "present" ? "Present" : emp.status === "half day" ? "Half Day" : emp.status === "leave" ? "Leave" : "Absent"}
     </span>,
     emp.checkInTime || "-",
     emp.checkOutTime || "-",
@@ -96,31 +173,56 @@ export default function Attendance() {
             <p className="text-muted-foreground">Track employee attendance in real-time</p>
           </div>
           <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-foreground">Select Date:</label>
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => {
+                setSelectedDate(e.target.value)
+
+              }}
+              max={getTodayDate()} // Don't allow future dates
               className="px-4 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
+            {selectedDate !== getTodayDate() && (
+              <button
+                onClick={() => setSelectedDate(getTodayDate())}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium"
+              >
+                Today
+              </button>
+            )}
           </div>
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-card border border-border rounded-lg p-6">
             <p className="text-sm text-muted-foreground mb-1">Total Employees</p>
             <p className="text-3xl font-bold text-foreground">{employees.length}</p>
           </div>
           <div className="bg-card border border-border rounded-lg p-6">
-            <p className="text-sm text-muted-foreground mb-1">Present Today</p>
+            <p className="text-sm text-muted-foreground mb-1">
+              Present {selectedDate === getTodayDate() ? 'Today' : `on ${new Date(selectedDate).toLocaleDateString()}`}
+            </p>
             <p className="text-3xl font-bold text-green-600">
               {employees.filter(emp => emp.status === "present").length}
             </p>
           </div>
           <div className="bg-card border border-border rounded-lg p-6">
-            <p className="text-sm text-muted-foreground mb-1">Absent Today</p>
+            <p className="text-sm text-muted-foreground mb-1">
+              Half Day {selectedDate === getTodayDate() ? 'Today' : `on ${new Date(selectedDate).toLocaleDateString()}`}
+            </p>
+            <p className="text-3xl font-bold text-yellow-600">
+              {employees.filter(emp => emp.status === "half day").length}
+            </p>
+          </div>
+          <div className="bg-card border border-border rounded-lg p-6">
+            <p className="text-sm text-muted-foreground mb-1">
+              Absent {selectedDate === getTodayDate() ? 'Today' : `on ${new Date(selectedDate).toLocaleDateString()}`}
+            </p>
             <p className="text-3xl font-bold text-red-600">
-              {employees.filter(emp => emp.status !== "present").length}
+              {employees.filter(emp => emp.status === "absent").length}
             </p>
           </div>
         </div>

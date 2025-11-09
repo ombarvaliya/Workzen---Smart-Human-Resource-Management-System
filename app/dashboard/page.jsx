@@ -7,6 +7,15 @@ import { Search, Plane, Clock, LogIn, LogOut as LogOutIcon } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import toast, { Toaster } from "react-hot-toast"
 
+// Helper function to get today's date in YYYY-MM-DD format (local timezone)
+const getTodayDate = () => {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export default function Dashboard() {
   const { user } = useAuth()
   const [employees, setEmployees] = useState([])
@@ -17,15 +26,14 @@ export default function Dashboard() {
 
   // ✅ Fetch employees only after user loads
   useEffect(() => {
-    if (user?.loginId) {
+    if (user?.id || user?.loginId) {
       fetchEmployees()
     }
   }, [user])
 
   // Re-fetch employees when attendance is updated elsewhere (navbar / attendance page)
   useEffect(() => {
-    const handler = (e) => {
-      console.log("attendanceUpdated event received", e.detail)
+    const handler = () => {
       fetchEmployees()
     }
 
@@ -52,7 +60,15 @@ export default function Dashboard() {
   const fetchEmployees = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/employees?companyId=${user?.loginId || ""}`)
+      const authToken = localStorage.getItem('authToken')
+      
+      // Fetch users
+      const response = await fetch(`/api/users`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      })
       
       // Check if response is OK
       if (!response.ok) {
@@ -71,13 +87,81 @@ export default function Dashboard() {
       }
       
       const data = await response.json()
-      console.log("Fetched employees:", data)
       
-      if (data.success && Array.isArray(data.employees)) {
-        setEmployees(data.employees)
-        console.log("Set employees:", data.employees.length, "employees")
+      if (data.success && data.data && Array.isArray(data.data)) {
+        // Fetch today's attendance for all users
+        const attendanceResponse = await fetch(`/api/attendance`, {
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        let attendanceMap = {}
+        if (attendanceResponse.ok) {
+          const attendanceData = await attendanceResponse.json()
+          
+          if (attendanceData.success && Array.isArray(attendanceData.data)) {
+            const today = getTodayDate()
+            
+            attendanceData.data.forEach(record => {
+              if (record.date === today) {
+                attendanceMap[record.userId] = record
+              }
+            })
+          }
+        }
+        
+        // Transform API data to match dashboard expectations and merge with attendance
+        const transformedEmployees = data.data.map(user => {
+          const todayAttendance = attendanceMap[user.id]
+          
+          const checkInTime = todayAttendance?.checkIn 
+            ? new Date(todayAttendance.checkIn).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) 
+            : null
+          
+          const checkOutTime = todayAttendance?.checkOut 
+            ? new Date(todayAttendance.checkOut).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) 
+            : null
+          
+          // Calculate actual status based on worked hours
+          let calculatedStatus = 'absent'
+          if (todayAttendance?.checkIn && todayAttendance?.checkOut) {
+            const checkInDate = new Date(todayAttendance.checkIn)
+            const checkOutDate = new Date(todayAttendance.checkOut)
+            const workedHours = (checkOutDate - checkInDate) / (1000 * 60 * 60)
+            
+            if (workedHours >= 8) {
+              calculatedStatus = 'present'
+            } else if (workedHours >= 4) {
+              calculatedStatus = 'half day'
+            } else {
+              calculatedStatus = 'absent'
+            }
+          } else if (todayAttendance?.checkIn && !todayAttendance?.checkOut) {
+            // Only checked in, not yet checked out - consider present for now
+            calculatedStatus = 'present'
+          } else {
+            calculatedStatus = 'absent'
+          }
+          
+          return {
+            id: user.id,
+            _id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            department: user.department,
+            position: user.role, // Use role as position
+            avatar: user.name.charAt(0).toUpperCase(),
+            avatarColor: '#8B5CF6',
+            status: calculatedStatus,
+            checkInTime: checkInTime,
+            checkOutTime: checkOutTime,
+          }
+        })
+        setEmployees(transformedEmployees)
       } else {
-        console.warn("Invalid employee data format:", data)
         setEmployees([])
       }
     } catch (error) {
@@ -90,16 +174,23 @@ export default function Dashboard() {
 
   const handleCheckIn = async (employeeId) => {
     try {
-      const response = await fetch("/api/employees", {
+      const authToken = localStorage.getItem('authToken')
+      const today = getTodayDate()
+      
+      const response = await fetch("/api/attendance", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${authToken}`
+        },
         body: JSON.stringify({
-          action: "check-in",
-          id: employeeId,
-          checkInTime: currentTime,
+          userId: employeeId,
+          date: today,
+          checkIn: new Date().toISOString(),
         }),
       })
       const data = await response.json()
+      
       if (data.success) {
         toast.success("Checked in successfully!", {
           duration: 3000,
@@ -108,26 +199,48 @@ export default function Dashboard() {
         })
         fetchEmployees()
       } else {
-        toast.error("Failed to check in")
+        toast.error(data.error || "Failed to check in")
       }
     } catch (error) {
       console.error("Error checking in:", error)
-      toast.error("Error checking in")
+      toast.error("Error checking in: " + error.message)
     }
   }
 
   const handleCheckOut = async (employeeId) => {
     try {
-      const response = await fetch("/api/employees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const authToken = localStorage.getItem('authToken')
+      
+      const getResponse = await fetch(`/api/attendance?userId=${employeeId}`, {
+        headers: {
+          "Authorization": `Bearer ${authToken}`
+        }
+      })
+      const attendanceData = await getResponse.json()
+      
+      const today = getTodayDate()
+      const todayAttendance = attendanceData.data?.find(record => 
+        record.date === today && !record.checkOut
+      )
+      
+      if (!todayAttendance) {
+        toast.error("No check-in record found for today")
+        return
+      }
+      
+      const response = await fetch("/api/attendance", {
+        method: "PATCH",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${authToken}`
+        },
         body: JSON.stringify({
-          action: "check-out",
-          id: employeeId,
-          checkOutTime: currentTime,
+          id: todayAttendance.id,
+          checkOut: new Date().toISOString(),
         }),
       })
       const data = await response.json()
+      
       if (data.success) {
         toast.success("Checked out successfully!", {
           duration: 3000,
@@ -136,11 +249,11 @@ export default function Dashboard() {
         })
         fetchEmployees()
       } else {
-        toast.error("Failed to check out")
+        toast.error(data.error || "Failed to check out")
       }
     } catch (error) {
       console.error("Error checking out:", error)
-      toast.error("Error checking out")
+      toast.error("Error checking out: " + error.message)
     }
   }
 
@@ -151,10 +264,14 @@ export default function Dashboard() {
   )
 
   const getStatusIndicator = (status) => {
-    switch (status) {
+    const normalizedStatus = status?.toLowerCase()
+    switch (normalizedStatus) {
       case "present":
         return <div className="w-3 h-3 rounded-full bg-green-500" title="Present in office" />
+      case "half day":
+        return <div className="w-3 h-3 rounded-full bg-blue-500" title="Half Day" />
       case "on-leave":
+      case "leave":
         return <Plane className="w-3 h-3 text-orange-500" title="On leave" />
       case "absent":
         return <div className="w-3 h-3 rounded-full bg-yellow-500" title="Absent" />
@@ -200,6 +317,11 @@ export default function Dashboard() {
           <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
           <p className="mt-4 text-muted-foreground">Loading employees...</p>
         </div>
+      ) : filteredEmployees.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">No employees found</p>
+          <p className="text-sm text-muted-foreground mt-2">Total employees in system: {employees.length}</p>
+        </div>
       ) : (
         // Employee grid
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -231,10 +353,21 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {employee.status === "present" && (
-                <div className="mt-4 text-center text-xs text-muted-foreground">
-                  {employee.checkInTime && <p>In: {employee.checkInTime}</p>}
-                  {employee.checkOutTime && <p>Out: {employee.checkOutTime}</p>}
+              {/* Show attendance times for any employee who has checked in */}
+              {(employee.checkInTime || employee.checkOutTime) && (
+                <div className="mt-4 text-center text-xs text-muted-foreground space-y-1">
+                  {employee.checkInTime && (
+                    <p className="flex items-center justify-center gap-1">
+                      <LogIn className="w-3 h-3" />
+                      In: {employee.checkInTime}
+                    </p>
+                  )}
+                  {employee.checkOutTime && (
+                    <p className="flex items-center justify-center gap-1">
+                      <LogOutIcon className="w-3 h-3" />
+                      Out: {employee.checkOutTime}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -334,7 +467,9 @@ export default function Dashboard() {
                     {selectedEmployee.status !== "present" || !selectedEmployee.checkInTime ? (
                       <button
                         onClick={() => {
-                          handleCheckIn(selectedEmployee._id || selectedEmployee.id)
+
+
+                          handleCheckIn(selectedEmployee.id)
                           setSelectedEmployee(null)
                         }}
                         className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
@@ -344,7 +479,9 @@ export default function Dashboard() {
                     ) : !selectedEmployee.checkOutTime ? (
                       <button
                         onClick={() => {
-                          handleCheckOut(selectedEmployee._id || selectedEmployee.id)
+
+
+                          handleCheckOut(selectedEmployee.id)
                           setSelectedEmployee(null)
                         }}
                         className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
@@ -382,15 +519,34 @@ export default function Dashboard() {
 
           {/* Find current user's employee record */}
           {(() => {
-            const currentEmployee = employees.find((emp) => emp.id === user.loginId)
+            // Try to find employee by ID first, then by email
+            const currentEmployee = employees.find((emp) => 
+              emp.id === user.id || 
+              emp.id === user.loginId || 
+              emp.email === user.email
+            )
+            
+            const userId = currentEmployee?.id // Use employee's actual ID from database
             const isCheckedIn = currentEmployee?.checkInTime && !currentEmployee?.checkOutTime
             const isCheckedOut = currentEmployee?.checkOutTime
+
+
+            if (!currentEmployee || !userId) {
+              return (
+                <div className="text-sm text-muted-foreground text-center py-2">
+                  Employee record not found
+                </div>
+              )
+            }
 
             return (
               <div className="space-y-2">
                 {!isCheckedIn && !isCheckedOut && (
                   <button
-                    onClick={() => handleCheckIn(user.loginId)}
+                    onClick={() => {
+
+                      handleCheckIn(userId)
+                    }}
                     className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                   >
                     <LogIn className="w-4 h-4" />
@@ -410,7 +566,10 @@ export default function Dashboard() {
                       </p>
                     </div>
                     <button
-                      onClick={() => handleCheckOut(user.loginId)}
+                      onClick={() => {
+
+                        handleCheckOut(userId)
+                      }}
                       className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                     >
                       <LogOutIcon className="w-4 h-4" />

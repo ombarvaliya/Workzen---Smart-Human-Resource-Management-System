@@ -54,32 +54,24 @@ export default function Login() {
    * @param {Event} e - Form submit event
    */
   const handleLogin = async (e) => {
-    console.log("=== handleLogin called ===")
-    e.preventDefault() // Prevent default form submission
-    console.log("Form submission prevented")
-    setErrors({}) // Clear previous errors
+    e.preventDefault()
+    setErrors({})
     
-    // Validate form fields
     const validationErrors = validateLoginForm()
-    console.log("Validation errors:", validationErrors)
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors)
       return
     }
 
     setIsSubmitting(true)
-    console.log("Calling login with:", { email, password: "***" })
     
     try {
-      // Call login function which will fetch user from JSON file
       await login({
         email,
-        loginId: email, // Allow login with either email or loginId
+        loginId: email,
         password,
       })
       
-      console.log("Login successful, navigating to dashboard")
-      // Navigate to dashboard on successful login
       await router.push("/dashboard")
     } catch (error) {
       console.error("Login error:", error)
@@ -124,8 +116,10 @@ export default function Login() {
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value)
-                  if (errors.email) setErrors({ ...errors, email: "" })
+                  // Clear all errors when user starts typing
+                  setErrors({})
                 }}
+                onFocus={() => setErrors({})}
                 placeholder="your-login-id or email"
                 className={`w-full px-4 py-2 border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 ${
                   errors.email ? "border-red-500 focus:ring-red-500" : "border-border focus:ring-accent"
@@ -143,8 +137,10 @@ export default function Login() {
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value)
-                  if (errors.password) setErrors({ ...errors, password: "" })
+                  // Clear all errors when user starts typing
+                  setErrors({})
                 }}
+                onFocus={() => setErrors({})}
                 placeholder="••••••••"
                 className={`w-full px-4 py-2 border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 ${
                   errors.password ? "border-red-500 focus:ring-red-500" : "border-border focus:ring-accent"

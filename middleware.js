@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 /**
  * Middleware Function
  * Runs on server-side before each page request
- * Protects routes by checking for authentication cookie
+ * Protects routes by checking for authentication token
  * Redirects unauthenticated users to login page
  * 
  * @param {Request} request - The incoming HTTP request
@@ -23,12 +23,15 @@ export function middleware(request) {
     return NextResponse.next() // Continue to public page
   }
 
-  // Check if authentication cookie exists
-  const user = request.cookies.get("user")?.value
+  // Check if authentication token exists (in cookie or will be checked client-side)
+  const authToken = request.cookies.get("authToken")?.value
 
-  // If no user cookie and not on a public page, redirect to login
-  if (!user) {
-    return NextResponse.redirect(new URL("/", request.url))
+  // If no auth token cookie, allow client-side to handle it
+  // (Token might be in localStorage which middleware can't access)
+  // Client-side auth-context will handle redirect if needed
+  if (!authToken) {
+    // Allow the request to continue - client-side will handle auth
+    return NextResponse.next()
   }
 
   // User is authenticated, allow access to the requested page

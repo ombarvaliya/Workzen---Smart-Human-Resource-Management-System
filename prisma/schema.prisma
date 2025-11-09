@@ -16,10 +16,12 @@ model User {
   department String?      // Department name (optional)
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
+
   
   attendance Attendance[]
   leaves     Leave[]
   payrolls   Payroll[]
+
 }
 
 model Attendance {
